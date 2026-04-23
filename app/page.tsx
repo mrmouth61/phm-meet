@@ -5,6 +5,7 @@ import {
   Handshake,
   BarChart3,
   MessageCircle,
+  Phone,
   ChevronLeft,
   ChevronRight,
   Check,
@@ -14,13 +15,29 @@ import {
   X,
   Video,
   ArrowRight,
-  MapPin
+  MapPin,
+  Loader2,
+  AlertCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 // ============================================
+// API Config
+// ============================================
+
+const N8N_BASE_URL = "https://n8n.phm-bonn.de"
+
+// ============================================
 // Types
 // ============================================
+
+interface ApiEventType {
+  slug: string
+  title: string
+  description: string
+  duration_minutes: number
+  color?: string
+}
 
 interface EventType {
   slug: string
@@ -31,6 +48,11 @@ interface EventType {
   label: string
 }
 
+interface ApiSlot {
+  start: string
+  end: string
+}
+
 interface Participant {
   id: string
   firstName: string
@@ -39,79 +61,107 @@ interface Participant {
   phone: string
 }
 
-interface BookingData {
-  slot: Date
-  participants: Participant[]
-  notes: string
+interface BookingResponse {
+  success: boolean
+  booking: {
+    id: string
+    title: string
+    start: string
+    end: string
+    duration: number
+    zoom_url: string
+    reschedule_url: string
+    cancel_url: string
+  }
 }
 
 // ============================================
-// Constants
+// Icon & Label Mapping
 // ============================================
 
-const EVENT_TYPES: EventType[] = [
-  {
-    slug: "erstgespraech",
-    title: "Kennenlernen & Erstgespräch",
-    duration: 45,
-    description: "Kostenfreies Kennenlerngespräch – wir besprechen deine Situation und schauen, ob und wie ich dir weiterhelfen kann.",
-    icon: <Handshake className="w-5 h-5" strokeWidth={1.5} />,
-    label: "KENNENLERNEN",
-  },
-  {
-    slug: "statuscheck",
-    title: "Status-Check & Optimierung",
-    duration: 45,
-    description: "Für bestehende Mandanten – gemeinsamer Blick auf deine aktuelle Aufstellung und mögliche Optimierungen.",
-    icon: <BarChart3 className="w-5 h-5" strokeWidth={1.5} />,
-    label: "MANDANTEN",
-  },
-  {
-    slug: "telefon",
-    title: "Kurze Rücksprache",
-    duration: 15,
-    description: "Schnelle Abstimmung zu einer konkreten Frage oder einem laufenden Thema.",
-    icon: <MessageCircle className="w-5 h-5" strokeWidth={1.5} />,
-    label: "DIALOG",
-  },
-]
+function getEventMeta(slug: string): { icon: React.ReactNode; label: string } {
+  const map: Record<string, { icon: React.ReactNode; label: string }> = {
+    erstgespraech: {
+      icon: <Handshake className="w-5 h-5" strokeWidth={1.5} />,
+      label: "KENNENLERNEN",
+    },
+    service: {
+      icon: <BarChart3 className="w-5 h-5" strokeWidth={1.5} />,
+      label: "MANDANTEN",
+    },
+    telefon: {
+      icon: <Phone className="w-5 h-5" strokeWidth={1.5} />,
+      label: "DIALOG",
+    },
+    zweitgespraech: {
+      icon: <BarChart3 className="w-5 h-5" strokeWidth={1.5} />,
+      label: "ANALYSE",
+    },
+    drittgespraech: {
+      icon: <Handshake className="w-5 h-5" strokeWidth={1.5} />,
+      label: "STRATEGIE",
+    },
+    umsetzung: {
+      icon: <Check className="w-5 h-5" strokeWidth={1.5} />,
+      label: "ONBOARDING",
+    },
+    vertiefung: {
+      icon: <MessageCircle className="w-5 h-5" strokeWidth={1.5} />,
+      label: "VERTIEFUNG",
+    },
+  }
+  return (
+    map[slug] ?? {
+      icon: <Calendar className="w-5 h-5" strokeWidth={1.5} />,
+      label: "TERMIN",
+    }
+  )
+}
+
+// ============================================
+// API Functions
+// ============================================
+
+async function fetchEventTypes(): Promise<EventType[]> {
+  const res = await fetch(`${N8N_BASE_URL}/webhook/meet-event-types`)
+  if (!res.ok) throw new Error(`Event Types Fehler: ${res.status}`)
+  const data = await res.json()
+  const apiTypes: ApiEventType[] = data.eventTypes ?? []
+  return apiTypes.map((et) => ({
+    slug: et.slug,
+    title: et.title,
+    duration: et.duration_minutes,
+    description: et.description ?? "",
+    ...getEventMeta(et.slug),
+  }))
+}
+
+async function fetchSlots(slug: string, date: string): Promise<ApiSlot[]> {
+  const url = `${N8N_BASE_URL}/webhook/meet-slots?eventType=${slug}&date=${date}&range=week`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Slots Fehler: ${res.status}`)
+  const data = await res.json()
+  return data.slots ?? []
+}
+
+async function bookAppointment(payload: {
+  eventType: string
+  slot: string
+  participants: Omit<Participant, "id">[]
+  notes: string
+}): Promise<BookingResponse> {
+  const res = await fetch(`${N8N_BASE_URL}/webhook/meet-book`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw new Error(`Buchung fehlgeschlagen: ${res.status}`)
+  return res.json()
+}
 
 // ============================================
 // Utility Functions
 // ============================================
-
-function generateSlotsUTC(date: Date, duration: number): Date[] {
-  const slots: Date[] = []
-  const start = 9
-  const end = 18
-  const d = new Date(date)
-  const day = d.getDay()
-
-  if (day === 0 || day === 6) return slots
-
-  for (let h = start; h < end; h++) {
-    for (let m = 0; m < 60; m += 30) {
-      if (h + (m + duration) / 60 > end) continue
-      if (Math.random() > 0.45) {
-        const utcSlot = new Date(Date.UTC(
-          d.getFullYear(),
-          d.getMonth(),
-          d.getDate(),
-          h,
-          m,
-          0,
-          0
-        ))
-        slots.push(utcSlot)
-      }
-    }
-  }
-  return slots
-}
-
-function utcToLocal(utcDate: Date): Date {
-  return new Date(utcDate.getTime())
-}
 
 function getWeekDays(startDate: Date): Date[] {
   const days: Date[] = []
@@ -119,13 +169,20 @@ function getWeekDays(startDate: Date): Date[] {
   const dayOfWeek = d.getDay()
   const monday = new Date(d)
   monday.setDate(d.getDate() - ((dayOfWeek + 6) % 7))
-
   for (let i = 0; i < 5; i++) {
     const day = new Date(monday)
     day.setDate(monday.getDate() + i)
     days.push(day)
   }
   return days
+}
+
+function isSameDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  )
 }
 
 const formatDate = (d: Date) =>
@@ -135,13 +192,18 @@ const formatTime = (d: Date) =>
   d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })
 
 const formatFullDate = (d: Date) =>
-  d.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
+  d.toLocaleDateString("de-DE", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  })
 
 // ============================================
 // Components
 // ============================================
 
-function Logo({ variant = "light" }: { variant?: "light" | "dark" }) {
+function Logo() {
   const [imgError, setImgError] = useState(false)
 
   if (!imgError) {
@@ -161,20 +223,13 @@ function Logo({ variant = "light" }: { variant?: "light" | "dark" }) {
     <a href="https://diefinanzmanufaktur.de" className="flex items-center gap-3">
       <div className="flex items-center gap-[2px]">
         {["P", "H", "M"].map((letter) => (
-          <div
-            key={letter}
-            className="w-9 h-9 bg-[#F8F7F4] flex items-center justify-center"
-          >
-            <span className="font-serif text-sm font-bold text-[#083256]">
-              {letter}
-            </span>
+          <div key={letter} className="w-9 h-9 bg-[#F8F7F4] flex items-center justify-center">
+            <span className="font-serif text-sm font-bold text-[#083256]">{letter}</span>
           </div>
         ))}
       </div>
       <div className="hidden sm:block border-l border-[#B59B54]/30 pl-3 ml-1">
-        <div className="text-[9px] tracking-[0.25em] uppercase leading-none text-[#B59B54]/70">
-          DIE
-        </div>
+        <div className="text-[9px] tracking-[0.25em] uppercase leading-none text-[#B59B54]/70">DIE</div>
         <div className="text-[11px] tracking-[0.15em] uppercase font-medium leading-tight text-[#F8F7F4]">
           FINANZMANUFAKTUR
         </div>
@@ -185,15 +240,15 @@ function Logo({ variant = "light" }: { variant?: "light" | "dark" }) {
 
 function ProgressIndicator({
   currentStep,
-  onStepClick
+  onStepClick,
 }: {
   currentStep: number
   onStepClick: (step: number) => void
 }) {
   const steps = [
-    { num: 1, label: "Terminart", id: "step-1" },
-    { num: 2, label: "Datum & Zeit", id: "step-2" },
-    { num: 3, label: "Kontakt", id: "step-3" },
+    { num: 1, label: "Terminart" },
+    { num: 2, label: "Datum & Zeit" },
+    { num: 3, label: "Kontakt" },
   ]
 
   return (
@@ -220,16 +275,22 @@ function ProgressIndicator({
                     isCompleted
                       ? "bg-[#B59B54] text-white hover:bg-[#a08847]"
                       : isCurrent
-                        ? "bg-[#083256] text-white"
-                        : "bg-[#E8E4DF] text-[#6B7280]"
+                      ? "bg-[#083256] text-white"
+                      : "bg-[#E8E4DF] text-[#6B7280]"
                   )}
                 >
-                  {isCompleted ? <Check className="w-4 h-4" strokeWidth={1.5} /> : String(step.num).padStart(2, "0")}
+                  {isCompleted ? (
+                    <Check className="w-4 h-4" strokeWidth={1.5} />
+                  ) : (
+                    String(step.num).padStart(2, "0")
+                  )}
                 </div>
-                <span className={cn(
-                  "text-[9px] tracking-[0.15em] uppercase mt-2 font-medium transition-colors",
-                  currentStep >= step.num ? "text-[#083256]" : "text-[#6B7280]"
-                )}>
+                <span
+                  className={cn(
+                    "text-[9px] tracking-[0.15em] uppercase mt-2 font-medium transition-colors",
+                    currentStep >= step.num ? "text-[#083256]" : "text-[#6B7280]"
+                  )}
+                >
                   {step.label}
                 </span>
               </button>
@@ -252,7 +313,7 @@ function ProgressIndicator({
 function EventTypeCard({
   event,
   isSelected,
-  onClick
+  onClick,
 }: {
   event: EventType
   isSelected: boolean
@@ -263,9 +324,7 @@ function EventTypeCard({
       onClick={onClick}
       className={cn(
         "relative w-full text-left transition-all duration-300 group",
-        isSelected
-          ? "transform scale-[1.02]"
-          : "hover:transform hover:scale-[1.01]"
+        isSelected ? "transform scale-[1.02]" : "hover:transform hover:scale-[1.01]"
       )}
     >
       <div
@@ -276,38 +335,35 @@ function EventTypeCard({
             : "bg-white border border-[#E8E4DF] group-hover:border-[#B59B54]"
         )}
       />
-
-      {/* Gold accent line */}
-      <div className={cn(
-        "absolute top-0 left-0 right-0 h-1 transition-all duration-300",
-        isSelected ? "bg-[#B59B54]" : "bg-transparent group-hover:bg-[#B59B54]"
-      )} />
-
+      <div
+        className={cn(
+          "absolute top-0 left-0 right-0 h-1 transition-all duration-300",
+          isSelected ? "bg-[#B59B54]" : "bg-transparent group-hover:bg-[#B59B54]"
+        )}
+      />
       <div className="relative p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
-            <div className={cn(
-              "text-[10px] font-medium tracking-[0.25em] uppercase mb-2 transition-colors",
-              isSelected ? "text-[#B59B54]" : "text-[#B59B54]"
-            )}>
+            <div className="text-[10px] font-medium tracking-[0.25em] uppercase mb-2 text-[#B59B54]">
               {event.label}
             </div>
-
-            <h3 className={cn(
-              "font-serif text-lg font-medium mb-3 leading-snug transition-colors",
-              isSelected ? "text-white" : "text-[#083256]"
-            )}>
+            <h3
+              className={cn(
+                "font-serif text-lg font-medium mb-3 leading-snug transition-colors",
+                isSelected ? "text-white" : "text-[#083256]"
+              )}
+            >
               {event.title}
             </h3>
-
-            <p className={cn(
-              "text-sm leading-relaxed transition-colors",
-              isSelected ? "text-white/70" : "text-[#6B7280]"
-            )}>
+            <p
+              className={cn(
+                "text-sm leading-relaxed transition-colors",
+                isSelected ? "text-white/70" : "text-[#6B7280]"
+              )}
+            >
               {event.description}
             </p>
           </div>
-
           <div className="flex flex-col items-end gap-3 flex-shrink-0">
             <div
               className={cn(
@@ -319,10 +375,12 @@ function EventTypeCard({
             >
               {event.icon}
             </div>
-            <span className={cn(
-              "font-mono text-xs transition-colors",
-              isSelected ? "text-[#B59B54]" : "text-[#6B7280]"
-            )}>
+            <span
+              className={cn(
+                "font-mono text-xs transition-colors",
+                isSelected ? "text-[#B59B54]" : "text-[#6B7280]"
+              )}
+            >
               {event.duration} Min
             </span>
           </div>
@@ -336,7 +394,7 @@ function CalendarView({
   selectedDate,
   onDateSelect,
   weekStart,
-  onWeekChange
+  onWeekChange,
 }: {
   selectedDate: Date | null
   onDateSelect: (date: Date) => void
@@ -378,9 +436,7 @@ function CalendarView({
           <span className="font-serif text-xl text-[#083256]">
             {days[0].toLocaleDateString("de-DE", { month: "long" })}
           </span>
-          <span className="text-[#B59B54] font-mono text-sm ml-2">
-            {days[0].getFullYear()}
-          </span>
+          <span className="text-[#B59B54] font-mono text-sm ml-2">{days[0].getFullYear()}</span>
         </div>
 
         <button
@@ -398,9 +454,9 @@ function CalendarView({
 
       <div className="grid grid-cols-5 gap-3">
         {days.map((day) => {
-          const isSelected = selectedDate && day.toDateString() === selectedDate.toDateString()
+          const isSelected = selectedDate ? isSameDay(day, selectedDate) : false
           const isPast = day < today
-          const isToday = day.toDateString() === today.toDateString()
+          const isToday = isSameDay(day, today)
 
           return (
             <button
@@ -412,23 +468,22 @@ function CalendarView({
                 isSelected
                   ? "bg-[#083256] text-white shadow-lg shadow-[#083256]/20"
                   : isPast
-                    ? "bg-[#F5F0E6] text-[#6B7280]/30 cursor-not-allowed"
-                    : "bg-white border border-[#E8E4DF] text-[#083256] hover:border-[#B59B54] hover:shadow-md cursor-pointer"
+                  ? "bg-[#F5F0E6] text-[#6B7280]/30 cursor-not-allowed"
+                  : "bg-white border border-[#E8E4DF] text-[#083256] hover:border-[#B59B54] hover:shadow-md cursor-pointer"
               )}
             >
               {isToday && !isSelected && (
                 <div className="absolute top-1 right-1 w-2 h-2 bg-[#B59B54]" />
               )}
-              <div className={cn(
-                "text-[10px] uppercase tracking-wider mb-2 font-medium",
-                isSelected ? "text-[#B59B54]" : isPast ? "text-[#6B7280]/30" : "text-[#6B7280]"
-              )}>
+              <div
+                className={cn(
+                  "text-[10px] uppercase tracking-wider mb-2 font-medium",
+                  isSelected ? "text-[#B59B54]" : isPast ? "text-[#6B7280]/30" : "text-[#6B7280]"
+                )}
+              >
                 {day.toLocaleDateString("de-DE", { weekday: "short" })}
               </div>
-              <div className={cn(
-                "font-serif text-3xl font-medium",
-                isPast && "opacity-30"
-              )}>
+              <div className={cn("font-serif text-3xl font-medium", isPast && "opacity-30")}>
                 {day.getDate()}
               </div>
             </button>
@@ -442,12 +497,23 @@ function CalendarView({
 function TimeSlots({
   slots,
   selectedSlot,
-  onSelect
+  onSelect,
+  loading,
 }: {
-  slots: Date[]
-  selectedSlot: Date | null
-  onSelect: (slot: Date) => void
+  slots: ApiSlot[]
+  selectedSlot: ApiSlot | null
+  onSelect: (slot: ApiSlot) => void
+  loading: boolean
 }) {
+  if (loading) {
+    return (
+      <div className="py-10 text-center">
+        <Loader2 className="w-6 h-6 text-[#B59B54] animate-spin mx-auto mb-3" />
+        <p className="text-[#6B7280] text-sm">Verfügbare Termine werden geladen…</p>
+      </div>
+    )
+  }
+
   if (!slots.length) {
     return (
       <div className="py-10 text-center">
@@ -462,21 +528,21 @@ function TimeSlots({
   return (
     <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-64 overflow-y-auto custom-scrollbar pr-1">
       {slots.map((slot) => {
-        const localSlot = utcToLocal(slot)
-        const isSelected = selectedSlot && slot.getTime() === selectedSlot.getTime()
+        const startDate = new Date(slot.start)
+        const isSelected = selectedSlot?.start === slot.start
 
         return (
           <button
-            key={slot.toISOString()}
+            key={slot.start}
             onClick={() => onSelect(slot)}
             className={cn(
-              "py-4 px-2 transition-all duration-200 font-mono text-sm group",
+              "py-4 px-2 transition-all duration-200 font-mono text-sm",
               isSelected
                 ? "bg-[#B59B54] text-white font-medium shadow-lg shadow-[#B59B54]/20"
                 : "bg-white border border-[#E8E4DF] text-[#083256] hover:border-[#B59B54] hover:bg-[#F5F0E6]"
             )}
           >
-            {formatTime(localSlot)}
+            {formatTime(startDate)}
           </button>
         )
       })}
@@ -498,112 +564,69 @@ function ParticipantForm({
   index: number
 }) {
   return (
-    <div className={cn(
-      "relative p-6 animate-fadeIn",
-      isPrimary ? "bg-[#083256]" : "bg-white border border-[#E8E4DF]"
-    )}>
+    <div
+      className={cn(
+        "relative p-6 animate-fadeIn",
+        isPrimary ? "bg-[#083256]" : "bg-white border border-[#E8E4DF]"
+      )}
+    >
       {!isPrimary && onRemove && (
         <button
           onClick={onRemove}
           className="absolute top-4 right-4 px-3 py-1.5 flex items-center gap-2 border border-[#083256] text-[#083256] text-xs font-medium tracking-wide uppercase hover:bg-[#083256] hover:text-white transition-all"
-          aria-label="Teilnehmer entfernen"
         >
           <X className="w-3.5 h-3.5" strokeWidth={1.5} />
           Entfernen
         </button>
       )}
 
-      <div className={cn(
-        "text-[10px] font-medium tracking-[0.25em] uppercase mb-5",
-        isPrimary ? "text-[#B59B54]" : "text-[#B59B54]"
-      )}>
+      <div
+        className={cn(
+          "text-[10px] font-medium tracking-[0.25em] uppercase mb-5 text-[#B59B54]"
+        )}
+      >
         {isPrimary ? "Deine Kontaktdaten" : `Weitere Person ${index}`}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <label className={cn(
-            "block text-[10px] font-medium mb-2 tracking-wide uppercase",
-            isPrimary ? "text-white/70" : "text-[#083256]"
-          )}>
-            Vorname <span className="text-[#B59B54]">*</span>
-          </label>
-          <input
-            type="text"
-            value={participant.firstName}
-            onChange={(e) => onUpdate("firstName", e.target.value)}
-            placeholder="Max"
-            className={cn(
-              "w-full px-4 py-3 text-sm transition-all focus:outline-none",
-              isPrimary
-                ? "bg-[#0a4170] border border-[#B59B54]/30 text-white placeholder:text-white/40 focus:border-[#B59B54]"
-                : "bg-white border border-[#E8E4DF] text-[#083256] placeholder:text-[#6B7280]/50 focus:border-[#083256]"
-            )}
-          />
-        </div>
-
-        <div>
-          <label className={cn(
-            "block text-[10px] font-medium mb-2 tracking-wide uppercase",
-            isPrimary ? "text-white/70" : "text-[#083256]"
-          )}>
-            Nachname <span className="text-[#B59B54]">*</span>
-          </label>
-          <input
-            type="text"
-            value={participant.lastName}
-            onChange={(e) => onUpdate("lastName", e.target.value)}
-            placeholder="Mustermann"
-            className={cn(
-              "w-full px-4 py-3 text-sm transition-all focus:outline-none",
-              isPrimary
-                ? "bg-[#0a4170] border border-[#B59B54]/30 text-white placeholder:text-white/40 focus:border-[#B59B54]"
-                : "bg-white border border-[#E8E4DF] text-[#083256] placeholder:text-[#6B7280]/50 focus:border-[#083256]"
-            )}
-          />
-        </div>
-
-        <div>
-          <label className={cn(
-            "block text-[10px] font-medium mb-2 tracking-wide uppercase",
-            isPrimary ? "text-white/70" : "text-[#083256]"
-          )}>
-            E-Mail <span className="text-[#B59B54]">*</span>
-          </label>
-          <input
-            type="email"
-            value={participant.email}
-            onChange={(e) => onUpdate("email", e.target.value)}
-            placeholder="max@beispiel.de"
-            className={cn(
-              "w-full px-4 py-3 text-sm transition-all focus:outline-none",
-              isPrimary
-                ? "bg-[#0a4170] border border-[#B59B54]/30 text-white placeholder:text-white/40 focus:border-[#B59B54]"
-                : "bg-white border border-[#E8E4DF] text-[#083256] placeholder:text-[#6B7280]/50 focus:border-[#083256]"
-            )}
-          />
-        </div>
-
-        <div>
-          <label className={cn(
-            "block text-[10px] font-medium mb-2 tracking-wide uppercase",
-            isPrimary ? "text-white/70" : "text-[#083256]"
-          )}>
-            Telefon <span className="text-[#B59B54]">*</span>
-          </label>
-          <input
-            type="tel"
-            value={participant.phone}
-            onChange={(e) => onUpdate("phone", e.target.value)}
-            placeholder="+49 171 1234567"
-            className={cn(
-              "w-full px-4 py-3 text-sm transition-all focus:outline-none",
-              isPrimary
-                ? "bg-[#0a4170] border border-[#B59B54]/30 text-white placeholder:text-white/40 focus:border-[#B59B54]"
-                : "bg-white border border-[#E8E4DF] text-[#083256] placeholder:text-[#6B7280]/50 focus:border-[#083256]"
-            )}
-          />
-        </div>
+        {(["firstName", "lastName", "email", "phone"] as const).map((field) => {
+          const labels: Record<string, string> = {
+            firstName: "Vorname",
+            lastName: "Nachname",
+            email: "E-Mail",
+            phone: "Telefon",
+          }
+          const placeholders: Record<string, string> = {
+            firstName: "Max",
+            lastName: "Mustermann",
+            email: "max@beispiel.de",
+            phone: "+49 171 1234567",
+          }
+          return (
+            <div key={field}>
+              <label
+                className={cn(
+                  "block text-[10px] font-medium mb-2 tracking-wide uppercase",
+                  isPrimary ? "text-white/70" : "text-[#083256]"
+                )}
+              >
+                {labels[field]} <span className="text-[#B59B54]">*</span>
+              </label>
+              <input
+                type={field === "email" ? "email" : field === "phone" ? "tel" : "text"}
+                value={participant[field]}
+                onChange={(e) => onUpdate(field, e.target.value)}
+                placeholder={placeholders[field]}
+                className={cn(
+                  "w-full px-4 py-3 text-sm transition-all focus:outline-none",
+                  isPrimary
+                    ? "bg-[#0a4170] border border-[#B59B54]/30 text-white placeholder:text-white/40 focus:border-[#B59B54]"
+                    : "bg-white border border-[#E8E4DF] text-[#083256] placeholder:text-[#6B7280]/50 focus:border-[#083256]"
+                )}
+              />
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -613,57 +636,60 @@ function BookingForm({
   selectedEvent,
   selectedSlot,
   onSubmit,
-  loading
+  loading,
+  error,
 }: {
   selectedEvent: EventType
-  selectedSlot: Date
-  onSubmit: (data: { participants: Participant[], notes: string }) => void
+  selectedSlot: ApiSlot
+  onSubmit: (data: { participants: Omit<Participant, "id">[]; notes: string }) => void
   loading: boolean
+  error: string | null
 }) {
   const [participants, setParticipants] = useState<Participant[]>([
-    { id: "primary", firstName: "", lastName: "", email: "", phone: "" }
+    { id: "primary", firstName: "", lastName: "", email: "", phone: "" },
   ])
   const [notes, setNotes] = useState("")
-  const localSlot = utcToLocal(selectedSlot)
   const participantRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+
+  const startDate = new Date(selectedSlot.start)
 
   const addParticipant = () => {
     const newId = crypto.randomUUID()
     setParticipants([
       ...participants,
-      { id: newId, firstName: "", lastName: "", email: "", phone: "" }
+      { id: newId, firstName: "", lastName: "", email: "", phone: "" },
     ])
-    // Scroll to new participant after render
     setTimeout(() => {
       const newRef = participantRefs.current.get(newId)
       if (newRef) {
-        const elementPosition = newRef.getBoundingClientRect().top
-        const offsetPosition = elementPosition + window.pageYOffset - 140
-        window.scrollTo({
-          top: offsetPosition,
-          behavior: "smooth"
-        })
+        const offsetPosition = newRef.getBoundingClientRect().top + window.pageYOffset - 140
+        window.scrollTo({ top: offsetPosition, behavior: "smooth" })
       }
     }, 100)
   }
 
   const updateParticipant = (id: string, field: keyof Participant, value: string) => {
-    setParticipants(participants.map(p =>
-      p.id === id ? { ...p, [field]: value } : p
-    ))
+    setParticipants(participants.map((p) => (p.id === id ? { ...p, [field]: value } : p)))
   }
 
   const removeParticipant = (id: string) => {
-    setParticipants(participants.filter(p => p.id !== id))
+    setParticipants(participants.filter((p) => p.id !== id))
   }
 
-  const isValid = participants[0].firstName &&
+  const isValid =
+    participants[0].firstName &&
     participants[0].lastName &&
     participants[0].email &&
     participants[0].phone &&
-    participants.every(p =>
-      p.id === "primary" || (p.firstName && p.lastName && p.email && p.phone)
+    participants.every(
+      (p) => p.id === "primary" || (p.firstName && p.lastName && p.email && p.phone)
     )
+
+  const handleSubmit = () => {
+    if (!isValid) return
+    const mapped = participants.map(({ id, ...rest }) => rest)
+    onSubmit({ participants: mapped, notes })
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -672,17 +698,15 @@ function BookingForm({
         <div className="text-[10px] font-medium tracking-[0.25em] uppercase text-[#B59B54] mb-3">
           Dein Termin
         </div>
-        <h3 className="font-serif text-base text-[#083256] mb-4">
-          {selectedEvent.title}
-        </h3>
+        <h3 className="font-serif text-base text-[#083256] mb-4">{selectedEvent.title}</h3>
         <div className="flex flex-wrap gap-6 text-sm">
           <div className="flex items-center gap-2 text-[#083256]">
             <Calendar className="w-4 h-4 text-[#B59B54]" strokeWidth={1.5} />
-            {formatFullDate(localSlot)}
+            {formatFullDate(startDate)}
           </div>
           <div className="flex items-center gap-2 text-[#083256]">
             <Clock className="w-4 h-4 text-[#B59B54]" strokeWidth={1.5} />
-            <span className="font-mono">{formatTime(localSlot)} Uhr</span>
+            <span className="font-mono">{formatTime(startDate)} Uhr</span>
           </div>
           <div className="flex items-center gap-2 text-[#083256]">
             <Video className="w-4 h-4 text-[#B59B54]" strokeWidth={1.5} />
@@ -731,8 +755,15 @@ function BookingForm({
         />
       </div>
 
+      {error && (
+        <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 text-red-700 text-sm">
+          <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" strokeWidth={1.5} />
+          <span>{error}</span>
+        </div>
+      )}
+
       <button
-        onClick={() => isValid && onSubmit({ participants, notes })}
+        onClick={handleSubmit}
         disabled={!isValid || loading}
         className={cn(
           "mt-2 py-5 px-6 text-sm font-semibold tracking-[0.15em] uppercase transition-all flex items-center justify-center gap-3",
@@ -742,7 +773,10 @@ function BookingForm({
         )}
       >
         {loading ? (
-          "Wird gebucht..."
+          <>
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Wird gebucht…
+          </>
         ) : (
           <>
             Termin verbindlich buchen
@@ -755,13 +789,14 @@ function BookingForm({
 }
 
 function ConfirmationView({
-  booking,
-  eventType
+  bookingResponse,
+  eventType,
 }: {
-  booking: BookingData
+  bookingResponse: BookingResponse
   eventType: EventType
 }) {
-  const localSlot = utcToLocal(booking.slot)
+  const { booking } = bookingResponse
+  const startDate = new Date(booking.start)
 
   return (
     <div className="animate-slideUp">
@@ -770,7 +805,6 @@ function ConfirmationView({
         <div className="w-16 h-16 bg-[#B59B54] flex items-center justify-center mx-auto mb-6">
           <Check className="w-8 h-8 text-white" strokeWidth={1.5} />
         </div>
-
         <h2 className="font-serif text-4xl sm:text-5xl font-medium text-[#083256] mb-4">
           Termin bestätigt
         </h2>
@@ -779,100 +813,55 @@ function ConfirmationView({
         </p>
       </div>
 
-      {/* Booking Summary Box */}
+      {/* Booking Summary */}
       <div className="bg-[#F5F0E6] p-8 mb-8">
         <div className="text-[10px] font-medium tracking-[0.25em] uppercase text-[#B59B54] mb-6">
           Zusammenfassung
         </div>
 
         <div className="space-y-5">
-          {/* Terminart */}
-          <div className="flex items-center gap-4">
-            <div className="w-10 h-10 bg-[#B59B54] flex items-center justify-center flex-shrink-0">
-              <Handshake className="w-5 h-5 text-white" strokeWidth={1.5} />
-            </div>
-            <div>
-              <div className="text-[10px] font-medium tracking-[0.2em] uppercase text-[#6B7280] mb-1">
-                Terminart
-              </div>
-              <div className="text-sm text-[#083256] font-medium">
-                {eventType.title}
-              </div>
-            </div>
-          </div>
-
-          {/* Datum */}
-          <div className="flex items-center gap-4">
-            <div className="w-10 h-10 bg-[#B59B54] flex items-center justify-center flex-shrink-0">
-              <Calendar className="w-5 h-5 text-white" strokeWidth={1.5} />
-            </div>
-            <div>
-              <div className="text-[10px] font-medium tracking-[0.2em] uppercase text-[#6B7280] mb-1">
-                Datum
-              </div>
-              <div className="text-sm text-[#083256] font-medium">
-                {formatFullDate(localSlot)}
-              </div>
-            </div>
-          </div>
-
-          {/* Uhrzeit & Dauer */}
-          <div className="flex items-center gap-4">
-            <div className="w-10 h-10 bg-[#B59B54] flex items-center justify-center flex-shrink-0">
-              <Clock className="w-5 h-5 text-white" strokeWidth={1.5} />
-            </div>
-            <div>
-              <div className="text-[10px] font-medium tracking-[0.2em] uppercase text-[#6B7280] mb-1">
-                Uhrzeit & Dauer
-              </div>
-              <div className="text-sm text-[#083256] font-mono font-medium">
-                {formatTime(localSlot)} Uhr · {eventType.duration} Minuten
-              </div>
-            </div>
-          </div>
-
-          {/* Ort */}
-          <div className="flex items-center gap-4">
-            <div className="w-10 h-10 bg-[#B59B54] flex items-center justify-center flex-shrink-0">
-              <Video className="w-5 h-5 text-white" strokeWidth={1.5} />
-            </div>
-            <div>
-              <div className="text-[10px] font-medium tracking-[0.2em] uppercase text-[#6B7280] mb-1">
-                Ort
-              </div>
-              <div className="text-sm text-[#083256]">
-                Zoom-Videocall (Link folgt per E-Mail)
-              </div>
-            </div>
-          </div>
-
-          {/* Teilnehmer (falls mehrere) */}
-          {booking.participants.length > 0 && (
-            <div className="flex items-center gap-4">
+          {[
+            { icon: <Handshake className="w-5 h-5 text-white" strokeWidth={1.5} />, label: "Terminart", value: eventType.title },
+            { icon: <Calendar className="w-5 h-5 text-white" strokeWidth={1.5} />, label: "Datum", value: formatFullDate(startDate) },
+            {
+              icon: <Clock className="w-5 h-5 text-white" strokeWidth={1.5} />,
+              label: "Uhrzeit & Dauer",
+              value: `${formatTime(startDate)} Uhr · ${booking.duration} Minuten`,
+              mono: true,
+            },
+            { icon: <Video className="w-5 h-5 text-white" strokeWidth={1.5} />, label: "Ort", value: "Zoom-Videocall (Link folgt per E-Mail)" },
+          ].map(({ icon, label, value, mono }) => (
+            <div key={label} className="flex items-center gap-4">
               <div className="w-10 h-10 bg-[#B59B54] flex items-center justify-center flex-shrink-0">
-                <UserPlus className="w-5 h-5 text-white" strokeWidth={1.5} />
+                {icon}
               </div>
               <div>
                 <div className="text-[10px] font-medium tracking-[0.2em] uppercase text-[#6B7280] mb-1">
-                  Teilnehmer
+                  {label}
                 </div>
-                <div className="text-sm text-[#083256]">
-                  {booking.participants.map(p => `${p.firstName} ${p.lastName}`).join(", ")}
+                <div className={cn("text-sm text-[#083256] font-medium", mono && "font-mono")}>
+                  {value}
                 </div>
               </div>
             </div>
-          )}
+          ))}
         </div>
       </div>
 
       {/* Action Buttons */}
       <div className="flex flex-col sm:flex-row gap-3 justify-center">
-        <button className="px-8 py-4 bg-[#083256] text-white text-sm font-medium tracking-[0.1em] uppercase hover:bg-[#0a4170] transition-all">
+        <a
+          href={booking.reschedule_url}
+          className="px-8 py-4 bg-[#083256] text-white text-sm font-medium tracking-[0.1em] uppercase hover:bg-[#0a4170] transition-all text-center"
+        >
           Termin verschieben
-        </button>
-        <button className="px-8 py-4 border border-[#C45B4A] text-sm font-medium text-[#C45B4A] tracking-[0.1em] uppercase hover:bg-[#C45B4A] hover:text-white transition-all">
+        </a>
+        <a
+          href={booking.cancel_url}
+          className="px-8 py-4 border border-[#C45B4A] text-sm font-medium text-[#C45B4A] tracking-[0.1em] uppercase hover:bg-[#C45B4A] hover:text-white transition-all text-center"
+        >
           Termin absagen
-        </button>
+        </a>
       </div>
     </div>
   )
@@ -884,18 +873,33 @@ function ConfirmationView({
 
 export default function PHMMeet() {
   const [step, setStep] = useState<"select" | "confirmed">("select")
+
+  // Event Types
+  const [eventTypes, setEventTypes] = useState<EventType[]>([])
+  const [loadingEventTypes, setLoadingEventTypes] = useState(true)
+  const [errorEventTypes, setErrorEventTypes] = useState<string | null>(null)
+
+  // Selection
   const [selectedEvent, setSelectedEvent] = useState<EventType | null>(null)
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
-  const [selectedSlot, setSelectedSlot] = useState<Date | null>(null)
+  const [selectedSlot, setSelectedSlot] = useState<ApiSlot | null>(null)
   const [weekStart, setWeekStart] = useState<Date>(() => {
     const d = new Date()
     d.setHours(0, 0, 0, 0)
     return d
   })
-  const [slots, setSlots] = useState<Date[]>([])
-  const [booking, setBooking] = useState<BookingData | null>(null)
-  const [loading, setLoading] = useState(false)
 
+  // Slots
+  const [allSlots, setAllSlots] = useState<ApiSlot[]>([])
+  const [loadingSlots, setLoadingSlots] = useState(false)
+  const [errorSlots, setErrorSlots] = useState<string | null>(null)
+
+  // Booking
+  const [bookingResponse, setBookingResponse] = useState<BookingResponse | null>(null)
+  const [loadingBooking, setLoadingBooking] = useState(false)
+  const [errorBooking, setErrorBooking] = useState<string | null>(null)
+
+  // Refs
   const step1Ref = useRef<HTMLElement>(null)
   const step2Ref = useRef<HTMLElement>(null)
   const step3Ref = useRef<HTMLElement>(null)
@@ -903,50 +907,51 @@ export default function PHMMeet() {
 
   const currentStep = !selectedEvent ? 1 : !selectedSlot ? 2 : 3
 
+  // Derived: slots for selected day
+  const slotsForSelectedDay: ApiSlot[] = selectedDate
+    ? allSlots.filter((s) => isSameDay(new Date(s.start), selectedDate))
+    : []
+
+  // Scroll helper
   const scrollToSection = useCallback((ref: React.RefObject<HTMLElement | null>, offset = 140) => {
     if (ref.current) {
-      const elementPosition = ref.current.getBoundingClientRect().top
-      const offsetPosition = elementPosition + window.pageYOffset - offset
-
-      window.scrollTo({
-        top: offsetPosition,
-        behavior: "smooth"
-      })
+      const offsetPosition = ref.current.getBoundingClientRect().top + window.pageYOffset - offset
+      window.scrollTo({ top: offsetPosition, behavior: "smooth" })
     }
   }, [])
 
-  const handleStepClick = useCallback((stepNum: number) => {
-    switch (stepNum) {
-      case 1:
-        scrollToSection(step1Ref)
-        break
-      case 2:
-        if (selectedEvent) scrollToSection(step2Ref)
-        break
-      case 3:
-        if (selectedSlot) scrollToSection(step3Ref)
-        break
-    }
-  }, [selectedEvent, selectedSlot, scrollToSection])
+  const handleStepClick = useCallback(
+    (stepNum: number) => {
+      if (stepNum === 1) scrollToSection(step1Ref)
+      if (stepNum === 2 && selectedEvent) scrollToSection(step2Ref)
+      if (stepNum === 3 && selectedSlot) scrollToSection(step3Ref)
+    },
+    [selectedEvent, selectedSlot, scrollToSection]
+  )
 
+  // Load event types on mount
   useEffect(() => {
-    if (selectedDate && selectedEvent) {
-      const generatedSlots = generateSlotsUTC(selectedDate, selectedEvent.duration)
-      setSlots(generatedSlots)
-      setSelectedSlot(null)
-      // Scroll to time slots after date selection
-      setTimeout(() => {
-        if (timeSlotsRef.current) {
-          const elementPosition = timeSlotsRef.current.getBoundingClientRect().top
-          const offsetPosition = elementPosition + window.pageYOffset - 140
-          window.scrollTo({
-            top: offsetPosition,
-            behavior: "smooth"
-          })
-        }
-      }, 150)
-    }
-  }, [selectedDate, selectedEvent])
+    setLoadingEventTypes(true)
+    fetchEventTypes()
+      .then(setEventTypes)
+      .catch(() => setErrorEventTypes("Terminarten konnten nicht geladen werden."))
+      .finally(() => setLoadingEventTypes(false))
+  }, [])
+
+  // Load slots when event type or week changes
+  useEffect(() => {
+    if (!selectedEvent) return
+    setLoadingSlots(true)
+    setErrorSlots(null)
+    setAllSlots([])
+    setSelectedSlot(null)
+
+    const dateStr = weekStart.toISOString().split("T")[0]
+    fetchSlots(selectedEvent.slug, dateStr)
+      .then(setAllSlots)
+      .catch(() => setErrorSlots("Verfügbare Termine konnten nicht geladen werden."))
+      .finally(() => setLoadingSlots(false))
+  }, [selectedEvent, weekStart])
 
   // Auto-scroll to step 2 when event is selected
   useEffect(() => {
@@ -955,6 +960,19 @@ export default function PHMMeet() {
     }
   }, [selectedEvent, selectedSlot, scrollToSection])
 
+  // Auto-scroll to time slots after date selection
+  useEffect(() => {
+    if (selectedDate) {
+      setTimeout(() => {
+        if (timeSlotsRef.current) {
+          const offsetPosition =
+            timeSlotsRef.current.getBoundingClientRect().top + window.pageYOffset - 140
+          window.scrollTo({ top: offsetPosition, behavior: "smooth" })
+        }
+      }, 150)
+    }
+  }, [selectedDate])
+
   // Auto-scroll to step 3 when slot is selected
   useEffect(() => {
     if (selectedSlot) {
@@ -962,35 +980,46 @@ export default function PHMMeet() {
     }
   }, [selectedSlot, scrollToSection])
 
-  const handleBook = useCallback((formData: { participants: Participant[], notes: string }) => {
-    if (!selectedSlot) return
+  const handleBook = useCallback(
+    async (formData: { participants: Omit<Participant, "id">[]; notes: string }) => {
+      if (!selectedSlot || !selectedEvent) return
 
-    setLoading(true)
-    setTimeout(() => {
-      setBooking({
-        ...formData,
-        slot: selectedSlot
-      })
-      setStep("confirmed")
-      setLoading(false)
-      window.scrollTo({ top: 0, behavior: "smooth" })
-    }, 1200)
-  }, [selectedSlot])
+      setLoadingBooking(true)
+      setErrorBooking(null)
+
+      try {
+        const response = await bookAppointment({
+          eventType: selectedEvent.slug,
+          slot: selectedSlot.start,
+          participants: formData.participants,
+          notes: formData.notes,
+        })
+        setBookingResponse(response)
+        setStep("confirmed")
+        window.scrollTo({ top: 0, behavior: "smooth" })
+      } catch (err) {
+        setErrorBooking(
+          "Die Buchung konnte leider nicht abgeschlossen werden. Bitte versuche es erneut oder kontaktiere uns direkt."
+        )
+      } finally {
+        setLoadingBooking(false)
+      }
+    },
+    [selectedSlot, selectedEvent]
+  )
 
   return (
     <div className="min-h-screen bg-[#F8F7F4]">
-      {/* Premium Navy Header */}
+      {/* Header */}
       <header className="bg-[#083256] border-b-4 border-[#B59B54]">
         <div className="max-w-5xl mx-auto px-6 py-5 flex items-center justify-between">
-          <Logo variant="light" />
+          <Logo />
           <div className="hidden sm:flex items-center gap-4">
             <div className="text-right">
               <div className="text-[9px] tracking-[0.2em] uppercase text-[#B59B54]/70">
                 Beratung buchen
               </div>
-              <div className="font-serif text-sm text-white">
-                Thilo Mund
-              </div>
+              <div className="font-serif text-sm text-white">Thilo Mund</div>
             </div>
             <div className="w-10 h-10 bg-[#B59B54] flex items-center justify-center">
               <MapPin className="w-4 h-4 text-white" strokeWidth={1.5} />
@@ -1001,8 +1030,8 @@ export default function PHMMeet() {
 
       {/* Main Content */}
       <main className="max-w-3xl mx-auto px-6 py-12 pb-20">
-        {step === "confirmed" && booking && selectedEvent ? (
-          <ConfirmationView booking={booking} eventType={selectedEvent} />
+        {step === "confirmed" && bookingResponse && selectedEvent ? (
+          <ConfirmationView bookingResponse={bookingResponse} eventType={selectedEvent} />
         ) : (
           <>
             {/* Headline */}
@@ -1011,18 +1040,20 @@ export default function PHMMeet() {
                 PHM – DIE FINANZMANUFAKTUR
               </div>
               <h1 className="font-serif text-4xl sm:text-5xl font-medium text-[#083256] mb-4 leading-tight">
-                Vereinbare<br />
+                Vereinbare
+                <br />
                 <span className="text-[#B59B54]">deinen Termin.</span>
               </h1>
               <p className="text-[#6B7280] max-w-lg mx-auto leading-relaxed">
-                Persönliche Beratung mit Thilo Mund. Wähle einen passenden Termin für unser Gespräch.
+                Persönliche Beratung mit Thilo Mund. Wähle einen passenden Termin für unser
+                Gespräch.
               </p>
             </div>
 
-            {/* Progress Indicator */}
+            {/* Progress */}
             <ProgressIndicator currentStep={currentStep} onStepClick={handleStepClick} />
 
-            {/* Step 1: Event Type Selection */}
+            {/* Step 1: Event Type */}
             <section ref={step1Ref} id="step-1" className="mb-10 scroll-mt-36">
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-8 h-8 bg-[#083256] flex items-center justify-center">
@@ -1032,22 +1063,40 @@ export default function PHMMeet() {
                   Terminart wählen
                 </h2>
               </div>
-              <div className="flex flex-col gap-4">
-                {EVENT_TYPES.map((event) => (
-                  <EventTypeCard
-                    key={event.slug}
-                    event={event}
-                    isSelected={selectedEvent?.slug === event.slug}
-                    onClick={() => {
-                      setSelectedEvent(event)
-                      setSelectedSlot(null)
-                    }}
-                  />
-                ))}
-              </div>
+
+              {loadingEventTypes && (
+                <div className="py-12 text-center">
+                  <Loader2 className="w-6 h-6 text-[#B59B54] animate-spin mx-auto mb-3" />
+                  <p className="text-[#6B7280] text-sm">Termine werden geladen…</p>
+                </div>
+              )}
+
+              {errorEventTypes && (
+                <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 text-red-700 text-sm">
+                  <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" strokeWidth={1.5} />
+                  <span>{errorEventTypes}</span>
+                </div>
+              )}
+
+              {!loadingEventTypes && !errorEventTypes && (
+                <div className="flex flex-col gap-4">
+                  {eventTypes.map((event) => (
+                    <EventTypeCard
+                      key={event.slug}
+                      event={event}
+                      isSelected={selectedEvent?.slug === event.slug}
+                      onClick={() => {
+                        setSelectedEvent(event)
+                        setSelectedSlot(null)
+                        setSelectedDate(null)
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
             </section>
 
-            {/* Step 2: Date & Time Selection */}
+            {/* Step 2: Date & Time */}
             {selectedEvent && (
               <section ref={step2Ref} id="step-2" className="mb-10 animate-fadeIn scroll-mt-36">
                 <div className="flex items-center gap-3 mb-6">
@@ -1066,8 +1115,18 @@ export default function PHMMeet() {
                     onWeekChange={setWeekStart}
                   />
 
+                  {errorSlots && (
+                    <div className="mt-6 flex items-start gap-3 p-4 bg-red-50 border border-red-200 text-red-700 text-sm">
+                      <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" strokeWidth={1.5} />
+                      <span>{errorSlots}</span>
+                    </div>
+                  )}
+
                   {selectedDate && (
-                    <div ref={timeSlotsRef} className="mt-8 pt-8 border-t border-[#E8E4DF] animate-fadeIn">
+                    <div
+                      ref={timeSlotsRef}
+                      className="mt-8 pt-8 border-t border-[#E8E4DF] animate-fadeIn"
+                    >
                       <div className="flex items-center gap-2 mb-5">
                         <Clock className="w-4 h-4 text-[#B59B54]" strokeWidth={1.5} />
                         <span className="text-[10px] font-medium tracking-[0.2em] uppercase text-[#6B7280]">
@@ -1075,9 +1134,10 @@ export default function PHMMeet() {
                         </span>
                       </div>
                       <TimeSlots
-                        slots={slots}
+                        slots={slotsForSelectedDay}
                         selectedSlot={selectedSlot}
                         onSelect={setSelectedSlot}
+                        loading={loadingSlots}
                       />
                     </div>
                   )}
@@ -1085,7 +1145,7 @@ export default function PHMMeet() {
               </section>
             )}
 
-            {/* Step 3: Contact Information */}
+            {/* Step 3: Contact */}
             {selectedSlot && selectedEvent && (
               <section ref={step3Ref} id="step-3" className="animate-fadeIn scroll-mt-36">
                 <div className="flex items-center gap-3 mb-6">
@@ -1096,12 +1156,12 @@ export default function PHMMeet() {
                     Deine Kontaktdaten
                   </h2>
                 </div>
-
                 <BookingForm
                   selectedEvent={selectedEvent}
                   selectedSlot={selectedSlot}
                   onSubmit={handleBook}
-                  loading={loading}
+                  loading={loadingBooking}
+                  error={errorBooking}
                 />
               </section>
             )}
@@ -1113,17 +1173,27 @@ export default function PHMMeet() {
       <footer className="bg-[#083256] mt-auto">
         <div className="max-w-5xl mx-auto px-6 py-10">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
-            <Logo variant="light" />
+            <Logo />
             <div className="text-center sm:text-right flex flex-col gap-2">
               <div className="text-xs text-white/80">
                 PHM – die Finanzmanufaktur | Inh. Thilo Mund | info@phm-bonn.de
               </div>
               <div className="flex items-center justify-center sm:justify-end gap-4 text-[10px] text-[#B59B54]/70">
-                <a href="https://diefinanzmanufaktur.de/impressum.html" target="_blank" rel="noopener noreferrer" className="hover:text-[#B59B54] transition-colors">
+                <a
+                  href="https://diefinanzmanufaktur.de/impressum.html"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-[#B59B54] transition-colors"
+                >
                   Impressum
                 </a>
                 <span>|</span>
-                <a href="https://diefinanzmanufaktur.de/datenschutz.html" target="_blank" rel="noopener noreferrer" className="hover:text-[#B59B54] transition-colors">
+                <a
+                  href="https://diefinanzmanufaktur.de/datenschutz.html"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-[#B59B54] transition-colors"
+                >
                   Datenschutz
                 </a>
               </div>
