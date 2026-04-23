@@ -25,8 +25,6 @@ import { cn } from "@/lib/utils"
 // API Config
 // ============================================
 
-const N8N_BASE_URL = ""
-
 // ============================================
 // Types
 // ============================================
@@ -123,7 +121,7 @@ function getEventMeta(slug: string): { icon: React.ReactNode; label: string } {
 // ============================================
 
 async function fetchEventTypes(): Promise<EventType[]> {
-  const res = await fetch(`${N8N_BASE_URL}/webhook/meet-event-types`)
+  const res = await fetch(`/api/event-types`)
   if (!res.ok) throw new Error(`Event Types Fehler: ${res.status}`)
   const data = await res.json()
   const apiTypes: ApiEventType[] = data.eventTypes ?? []
@@ -137,7 +135,7 @@ async function fetchEventTypes(): Promise<EventType[]> {
 }
 
 async function fetchSlots(slug: string, date: string): Promise<ApiSlot[]> {
-  const url = `${N8N_BASE_URL}/webhook/meet-slots?eventType=${slug}&date=${date}&range=week`
+  const url = `/api/slots?eventType=${slug}&date=${date}&range=week`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`Slots Fehler: ${res.status}`)
   const data = await res.json()
@@ -150,7 +148,7 @@ async function bookAppointment(payload: {
   participants: Omit<Participant, "id">[]
   notes: string
 }): Promise<BookingResponse> {
-  const res = await fetch(`${N8N_BASE_URL}/webhook/meet-book`, {
+  const res = await fetch(`/api/book`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
