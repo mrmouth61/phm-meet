@@ -124,7 +124,8 @@ async function fetchEventTypes(): Promise<EventType[]> {
   const res = await fetch(`/api/event-types`)
   if (!res.ok) throw new Error(`Event Types Fehler: ${res.status}`)
   const data = await res.json()
-  const apiTypes: ApiEventType[] = data.eventTypes ?? []
+  const raw = data.eventTypes
+  const apiTypes: ApiEventType[] = Array.isArray(raw) ? raw : raw ? [raw] : []
   return apiTypes.map((et) => ({
     slug: et.slug,
     title: et.title,
