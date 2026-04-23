@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils"
 // API Config
 // ============================================
 
-const N8N_BASE_URL = "https://n8n.phm-bonn.de"
+const N8N_BASE_URL = ""
 
 // ============================================
 // Types
