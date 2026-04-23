@@ -150,7 +150,7 @@ function Logo({ variant = "light" }: { variant?: "light" | "dark" }) {
         <img
           src="/logos/PHM_logo_white_transp_horizontal.svg"
           alt="PHM – die Finanzmanufaktur"
-          className="h-8 sm:h-10"
+          className="h-10 sm:h-12"
           onError={() => setImgError(true)}
         />
       </a>
