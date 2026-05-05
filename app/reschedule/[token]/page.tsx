@@ -213,10 +213,15 @@ export default function ReschedulePage() {
     fetch(`/api/slots?eventType=${booking.event_type}&date=${dateParam}&range=week`)
       .then(r => r.json())
       .then((data: unknown) => {
-        // API returns flat array of ISO strings
-        const all: string[] = Array.isArray(data)
-          ? (data as string[])
-          : ((data as any).slots ?? [])
+        // API kann Slots als String-Array ODER als Objekt-Array {start,end} liefern.
+        const raw = Array.isArray(data) ? data : ((data as any).slots ?? [])
+        const all: string[] = (Array.isArray(raw) ? raw : [])
+          .map((entry: any) => {
+            if (typeof entry === 'string') return entry
+            if (entry && typeof entry.start === 'string') return entry.start
+            return ''
+          })
+          .filter((iso) => typeof iso === 'string' && iso.length > 0)
 
         // Group by YYYY-MM-DD
         const grouped: Record<string, string[]> = {}

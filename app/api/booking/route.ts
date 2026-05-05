@@ -37,8 +37,17 @@ export async function GET(request: NextRequest) {
     }
 
     const data = await res.json()
-    // n8n kann ein Array oder ein Objekt zurückgeben — normalisieren
-    const booking = Array.isArray(data) ? data[0] : data
+    // n8n kann ein Array, ein direktes Booking oder ein Wrapper-Objekt liefern.
+    const raw = Array.isArray(data) ? data[0] : data
+    const booking = raw?.booking ?? raw
+
+    if (!booking || !booking.token || !booking.start_time) {
+      return NextResponse.json(
+        { error: 'Buchung nicht gefunden oder unvollständig' },
+        { status: 404 }
+      )
+    }
+
     return NextResponse.json(booking)
   } catch (err) {
     console.error('[api/booking] Error:', err)
