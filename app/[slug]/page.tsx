@@ -1,6 +1,8 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
+import { useParams } from "next/navigation"
+import Link from "next/link"
 import {
   Handshake,
   BarChart3,
@@ -35,7 +37,9 @@ interface ApiEventType {
   description: string
   duration_minutes: number
   color?: string
+  url_slug?: string
   show_on_homepage?: boolean
+  active?: boolean
 }
 
 interface EventType {
@@ -118,24 +122,36 @@ function getEventMeta(slug: string): { icon: React.ReactNode; label: string } {
 }
 
 // ============================================
-// API Functions
+// Slug Routing
 // ============================================
 
-async function fetchEventTypes(): Promise<EventType[]> {
-  const res = await fetch(`/api/event-types`)
+const RESERVED_SLUGS = ["reschedule", "cancel", "api"]
+
+async function fetchAllEventTypes(): Promise<ApiEventType[]> {
+  const res = await fetch(`/api/event-types?all=true`)
   if (!res.ok) throw new Error(`Event Types Fehler: ${res.status}`)
   const data = await res.json()
   const raw = data.eventTypes
-  const apiTypes: ApiEventType[] = Array.isArray(raw) ? raw : raw ? [raw] : []
-  const eventTypes = apiTypes.filter((et) => et.show_on_homepage !== false)
-  return eventTypes.map((et) => ({
+  return Array.isArray(raw) ? raw : raw ? [raw] : []
+}
+
+function matchEventTypeBySlug(types: ApiEventType[], slug: string): ApiEventType | null {
+  return types.find((et) => et.url_slug === slug) ?? types.find((et) => et.slug === slug) ?? null
+}
+
+function mapApiToEventType(et: ApiEventType): EventType {
+  return {
     slug: et.slug,
     title: et.title,
     duration: et.duration_minutes,
     description: et.description ?? "",
     ...getEventMeta(et.slug),
-  }))
+  }
 }
+
+// ============================================
+// API Functions
+// ============================================
 
 async function fetchSlots(slug: string, date: string): Promise<ApiSlot[]> {
   const url = `/api/slots?eventType=${slug}&date=${date}&range=week`
@@ -306,6 +322,128 @@ function ProgressIndicator({
             </div>
           )
         })}
+      </div>
+    </div>
+  )
+}
+
+function SlugProgressIndicator({
+  currentStep,
+  onStepClick,
+}: {
+  currentStep: number
+  onStepClick: (step: number) => void
+}) {
+  const steps = [
+    { num: 1, label: "Datum & Zeit" },
+    { num: 2, label: "Kontakt" },
+  ]
+
+  return (
+    <div className="sticky top-0 z-50 bg-[#F8F7F4] py-4 -mx-6 px-6 border-b border-[#E8E4DF]/50 mb-8">
+      <div className="flex items-center justify-center gap-2">
+        {steps.map((step, i) => {
+          const isCompleted = currentStep > step.num
+          const isCurrent = currentStep === step.num
+          const isClickable = isCompleted || isCurrent
+
+          return (
+            <div key={step.num} className="flex items-center">
+              <button
+                onClick={() => isClickable && onStepClick(step.num)}
+                disabled={!isClickable}
+                className={cn(
+                  "flex flex-col items-center transition-all duration-200",
+                  isClickable ? "cursor-pointer" : "cursor-not-allowed"
+                )}
+              >
+                <div
+                  className={cn(
+                    "w-10 h-10 flex items-center justify-center font-mono text-sm transition-all duration-300",
+                    isCompleted
+                      ? "bg-[#B59B54] text-white hover:bg-[#a08847]"
+                      : isCurrent
+                      ? "bg-[#083256] text-white"
+                      : "bg-[#E8E4DF] text-[#6B7280]"
+                  )}
+                >
+                  {isCompleted ? (
+                    <Check className="w-4 h-4" strokeWidth={1.5} />
+                  ) : (
+                    String(step.num).padStart(2, "0")
+                  )}
+                </div>
+                <span
+                  className={cn(
+                    "text-[9px] tracking-[0.15em] uppercase mt-2 font-medium transition-colors",
+                    currentStep >= step.num ? "text-[#083256]" : "text-[#6B7280]"
+                  )}
+                >
+                  {step.label}
+                </span>
+              </button>
+              {i < steps.length - 1 && (
+                <div
+                  className={cn(
+                    "w-12 h-[2px] mx-3 mb-5 transition-all duration-300",
+                    currentStep > step.num ? "bg-[#B59B54]" : "bg-[#E8E4DF]"
+                  )}
+                />
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function NotFoundView() {
+  return (
+    <div className="text-center py-16 animate-fadeIn">
+      <div className="w-16 h-16 bg-[#E8E4DF] flex items-center justify-center mx-auto mb-6">
+        <AlertCircle className="w-8 h-8 text-[#6B7280]" strokeWidth={1.5} />
+      </div>
+      <h2 className="font-serif text-3xl font-medium text-[#083256] mb-4">Seite nicht gefunden</h2>
+      <p className="text-[#6B7280] mb-8 max-w-md mx-auto">
+        Diese Buchungsseite existiert nicht. Bitte prüfe den Link oder buche über unsere
+        Hauptseite.
+      </p>
+      <Link
+        href="/"
+        className="inline-block px-8 py-4 bg-[#083256] text-white text-sm font-medium tracking-[0.1em] uppercase hover:bg-[#0a4170] transition-all"
+      >
+        Zur Hauptseite
+      </Link>
+    </div>
+  )
+}
+
+function UnavailableView() {
+  return (
+    <div className="text-center py-16 animate-fadeIn">
+      <div className="w-16 h-16 bg-[#F5F0E6] flex items-center justify-center mx-auto mb-6">
+        <Calendar className="w-8 h-8 text-[#B59B54]" strokeWidth={1.5} />
+      </div>
+      <h2 className="font-serif text-3xl font-medium text-[#083256] mb-4">
+        Diese Terminart ist aktuell nicht verfügbar.
+      </h2>
+      <p className="text-[#6B7280] mb-8 max-w-md mx-auto">
+        Bitte buche über unsere Hauptseite oder kontaktiere uns direkt.
+      </p>
+      <div className="flex flex-col sm:flex-row gap-3 justify-center">
+        <Link
+          href="/"
+          className="inline-block px-8 py-4 bg-[#083256] text-white text-sm font-medium tracking-[0.1em] uppercase hover:bg-[#0a4170] transition-all"
+        >
+          Zur Hauptseite
+        </Link>
+        <a
+          href="mailto:info@phm-bonn.de"
+          className="inline-block px-8 py-4 border border-[#B59B54] text-[#083256] text-sm font-medium tracking-[0.1em] uppercase hover:bg-[#F5F0E6] transition-all"
+        >
+          Kontakt aufnehmen
+        </a>
       </div>
     </div>
   )
@@ -872,15 +1010,15 @@ function ConfirmationView({
 // Main Component
 // ============================================
 
-export default function PHMMeet() {
+export default function SlugBookingPage() {
+  const params = useParams()
+  const slug = typeof params.slug === "string" ? params.slug : ""
+
+  const [pageState, setPageState] = useState<"loading" | "not-found" | "unavailable" | "booking">(
+    "loading"
+  )
   const [step, setStep] = useState<"select" | "confirmed">("select")
 
-  // Event Types
-  const [eventTypes, setEventTypes] = useState<EventType[]>([])
-  const [loadingEventTypes, setLoadingEventTypes] = useState(true)
-  const [errorEventTypes, setErrorEventTypes] = useState<string | null>(null)
-
-  // Selection
   const [selectedEvent, setSelectedEvent] = useState<EventType | null>(null)
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
   const [selectedSlot, setSelectedSlot] = useState<ApiSlot | null>(null)
@@ -890,30 +1028,34 @@ export default function PHMMeet() {
     return d
   })
 
-  // Slots
   const [allSlots, setAllSlots] = useState<ApiSlot[]>([])
   const [loadingSlots, setLoadingSlots] = useState(false)
   const [errorSlots, setErrorSlots] = useState<string | null>(null)
 
-  // Booking
   const [bookingResponse, setBookingResponse] = useState<BookingResponse | null>(null)
   const [loadingBooking, setLoadingBooking] = useState(false)
   const [errorBooking, setErrorBooking] = useState<string | null>(null)
 
-  // Refs
-  const step1Ref = useRef<HTMLElement>(null)
   const step2Ref = useRef<HTMLElement>(null)
   const step3Ref = useRef<HTMLElement>(null)
   const timeSlotsRef = useRef<HTMLDivElement>(null)
 
-  const currentStep = !selectedEvent ? 1 : !selectedSlot ? 2 : 3
+  const currentStep = !selectedSlot ? 1 : 2
 
-  // Derived: slots for selected day
   const slotsForSelectedDay: ApiSlot[] = selectedDate
     ? allSlots.filter((s) => isSameDay(new Date(s.start), selectedDate))
     : []
 
-  // Scroll helper
+  useEffect(() => {
+    const meta = document.createElement("meta")
+    meta.name = "robots"
+    meta.content = "noindex, nofollow"
+    document.head.appendChild(meta)
+    return () => {
+      document.head.removeChild(meta)
+    }
+  }, [])
+
   const scrollToSection = useCallback((ref: React.RefObject<HTMLElement | null>, offset = 140) => {
     if (ref.current) {
       const offsetPosition = ref.current.getBoundingClientRect().top + window.pageYOffset - offset
@@ -923,25 +1065,39 @@ export default function PHMMeet() {
 
   const handleStepClick = useCallback(
     (stepNum: number) => {
-      if (stepNum === 1) scrollToSection(step1Ref)
-      if (stepNum === 2 && selectedEvent) scrollToSection(step2Ref)
-      if (stepNum === 3 && selectedSlot) scrollToSection(step3Ref)
+      if (stepNum === 1) scrollToSection(step2Ref)
+      if (stepNum === 2 && selectedSlot) scrollToSection(step3Ref)
     },
-    [selectedEvent, selectedSlot, scrollToSection]
+    [selectedSlot, scrollToSection]
   )
 
-  // Load event types on mount
   useEffect(() => {
-    setLoadingEventTypes(true)
-    fetchEventTypes()
-      .then(setEventTypes)
-      .catch(() => setErrorEventTypes("Terminarten konnten nicht geladen werden."))
-      .finally(() => setLoadingEventTypes(false))
-  }, [])
+    if (!slug || RESERVED_SLUGS.includes(slug)) {
+      setPageState("not-found")
+      return
+    }
 
-  // Load slots when event type or week changes
+    setPageState("loading")
+    fetchAllEventTypes()
+      .then((types) => {
+        const matched = matchEventTypeBySlug(types, slug)
+        if (!matched) {
+          setPageState("not-found")
+          return
+        }
+        if (matched.active === false) {
+          setPageState("unavailable")
+          setSelectedEvent(mapApiToEventType(matched))
+          return
+        }
+        setSelectedEvent(mapApiToEventType(matched))
+        setPageState("booking")
+      })
+      .catch(() => setPageState("not-found"))
+  }, [slug])
+
   useEffect(() => {
-    if (!selectedEvent) return
+    if (!selectedEvent || pageState !== "booking") return
     setLoadingSlots(true)
     setErrorSlots(null)
     setAllSlots([])
@@ -952,16 +1108,8 @@ export default function PHMMeet() {
       .then(setAllSlots)
       .catch(() => setErrorSlots("Verfügbare Termine konnten nicht geladen werden."))
       .finally(() => setLoadingSlots(false))
-  }, [selectedEvent, weekStart])
+  }, [selectedEvent, weekStart, pageState])
 
-  // Auto-scroll to step 2 when event is selected
-  useEffect(() => {
-    if (selectedEvent && !selectedSlot) {
-      setTimeout(() => scrollToSection(step2Ref), 100)
-    }
-  }, [selectedEvent, selectedSlot, scrollToSection])
-
-  // Auto-scroll to time slots after date selection
   useEffect(() => {
     if (selectedDate) {
       setTimeout(() => {
@@ -974,7 +1122,6 @@ export default function PHMMeet() {
     }
   }, [selectedDate])
 
-  // Auto-scroll to step 3 when slot is selected
   useEffect(() => {
     if (selectedSlot) {
       setTimeout(() => scrollToSection(step3Ref), 100)
@@ -998,7 +1145,7 @@ export default function PHMMeet() {
         setBookingResponse(response)
         setStep("confirmed")
         window.scrollTo({ top: 0, behavior: "smooth" })
-      } catch (err) {
+      } catch {
         setErrorBooking(
           "Die Buchung konnte leider nicht abgeschlossen werden. Bitte versuche es erneut oder kontaktiere uns direkt."
         )
@@ -1011,7 +1158,6 @@ export default function PHMMeet() {
 
   return (
     <div className="min-h-screen bg-[#F8F7F4]">
-      {/* Header */}
       <header className="bg-[#083256] border-b-4 border-[#B59B54]">
         <div className="max-w-5xl mx-auto px-6 py-5 flex items-center justify-between">
           <Logo />
@@ -1029,148 +1175,118 @@ export default function PHMMeet() {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="max-w-3xl mx-auto px-6 py-12 pb-20">
-        {step === "confirmed" && bookingResponse && selectedEvent ? (
-          <ConfirmationView bookingResponse={bookingResponse} eventType={selectedEvent} />
-        ) : (
+        {pageState === "loading" && (
+          <div className="py-16 text-center">
+            <Loader2 className="w-6 h-6 text-[#B59B54] animate-spin mx-auto mb-3" />
+            <p className="text-[#6B7280] text-sm">Termin wird geladen…</p>
+          </div>
+        )}
+
+        {pageState === "not-found" && <NotFoundView />}
+
+        {pageState === "unavailable" && <UnavailableView />}
+
+        {pageState === "booking" && (
           <>
-            {/* Headline */}
-            <div className="text-center mb-10 animate-fadeIn">
-              <div className="text-[10px] font-medium tracking-[0.3em] uppercase text-[#B59B54] mb-4">
-                PHM – DIE FINANZMANUFAKTUR
-              </div>
-              <h1 className="font-serif text-4xl sm:text-5xl font-medium text-[#083256] mb-4 leading-tight">
-                Vereinbare
-                <br />
-                <span className="text-[#B59B54]">deinen Termin.</span>
-              </h1>
-              <p className="text-[#6B7280] max-w-lg mx-auto leading-relaxed">
-                Persönliche Beratung mit Thilo Mund. Wähle einen passenden Termin für unser
-                Gespräch.
-              </p>
-            </div>
-
-            {/* Progress */}
-            <ProgressIndicator currentStep={currentStep} onStepClick={handleStepClick} />
-
-            {/* Step 1: Event Type */}
-            <section ref={step1Ref} id="step-1" className="mb-10 scroll-mt-36">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-8 h-8 bg-[#083256] flex items-center justify-center">
-                  <span className="text-white font-mono text-sm">01</span>
-                </div>
-                <h2 className="text-sm font-medium tracking-[0.15em] uppercase text-[#083256]">
-                  Terminart wählen
-                </h2>
-              </div>
-
-              {loadingEventTypes && (
-                <div className="py-12 text-center">
-                  <Loader2 className="w-6 h-6 text-[#B59B54] animate-spin mx-auto mb-3" />
-                  <p className="text-[#6B7280] text-sm">Termine werden geladen…</p>
-                </div>
-              )}
-
-              {errorEventTypes && (
-                <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 text-red-700 text-sm">
-                  <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" strokeWidth={1.5} />
-                  <span>{errorEventTypes}</span>
-                </div>
-              )}
-
-              {!loadingEventTypes && !errorEventTypes && (
-                <div className="flex flex-col gap-4">
-                  {eventTypes.map((event) => (
-                    <EventTypeCard
-                      key={event.slug}
-                      event={event}
-                      isSelected={selectedEvent?.slug === event.slug}
-                      onClick={() => {
-                        setSelectedEvent(event)
-                        setSelectedSlot(null)
-                        setSelectedDate(null)
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-            </section>
-
-            {/* Step 2: Date & Time */}
-            {selectedEvent && (
-              <section ref={step2Ref} id="step-2" className="mb-10 animate-fadeIn scroll-mt-36">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="w-8 h-8 bg-[#083256] flex items-center justify-center">
-                    <span className="text-white font-mono text-sm">02</span>
+            {step === "confirmed" && bookingResponse && selectedEvent ? (
+              <ConfirmationView bookingResponse={bookingResponse} eventType={selectedEvent} />
+            ) : (
+              <>
+                <div className="text-center mb-10 animate-fadeIn">
+                  <div className="text-[10px] font-medium tracking-[0.3em] uppercase text-[#B59B54] mb-4">
+                    PHM – DIE FINANZMANUFAKTUR
                   </div>
-                  <h2 className="text-sm font-medium tracking-[0.15em] uppercase text-[#083256]">
-                    Datum & Uhrzeit
-                  </h2>
+                  <h1 className="font-serif text-4xl sm:text-5xl font-medium text-[#083256] mb-4 leading-tight">
+                    Vereinbare
+                    <br />
+                    <span className="text-[#B59B54]">deinen Termin.</span>
+                  </h1>
                 </div>
-                <div className="bg-white border border-[#E8E4DF] p-6 sm:p-8 shadow-sm">
-                  <CalendarView
-                    selectedDate={selectedDate}
-                    onDateSelect={setSelectedDate}
-                    weekStart={weekStart}
-                    onWeekChange={setWeekStart}
-                  />
 
-                  {errorSlots && (
-                    <div className="mt-6 flex items-start gap-3 p-4 bg-red-50 border border-red-200 text-red-700 text-sm">
-                      <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" strokeWidth={1.5} />
-                      <span>{errorSlots}</span>
-                    </div>
-                  )}
+                <SlugProgressIndicator currentStep={currentStep} onStepClick={handleStepClick} />
 
-                  {selectedDate && (
-                    <div
-                      ref={timeSlotsRef}
-                      className="mt-8 pt-8 border-t border-[#E8E4DF] animate-fadeIn"
-                    >
-                      <div className="flex items-center gap-2 mb-5">
-                        <Clock className="w-4 h-4 text-[#B59B54]" strokeWidth={1.5} />
-                        <span className="text-[10px] font-medium tracking-[0.2em] uppercase text-[#6B7280]">
-                          Verfügbare Zeiten am {formatDate(selectedDate)}
-                        </span>
+                {selectedEvent && (
+                  <section ref={step2Ref} id="step-1" className="mb-10 animate-fadeIn scroll-mt-36">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="w-8 h-8 bg-[#083256] flex items-center justify-center">
+                        <span className="text-white font-mono text-sm">01</span>
                       </div>
-                      <TimeSlots
-                        slots={slotsForSelectedDay}
-                        selectedSlot={selectedSlot}
-                        onSelect={setSelectedSlot}
-                        loading={loadingSlots}
-                      />
+                      <h2 className="text-sm font-medium tracking-[0.15em] uppercase text-[#083256]">
+                        Datum & Uhrzeit
+                      </h2>
                     </div>
-                  )}
-                </div>
-              </section>
-            )}
 
-            {/* Step 3: Contact */}
-            {selectedSlot && selectedEvent && (
-              <section ref={step3Ref} id="step-3" className="animate-fadeIn scroll-mt-36">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="w-8 h-8 bg-[#083256] flex items-center justify-center">
-                    <span className="text-white font-mono text-sm">03</span>
-                  </div>
-                  <h2 className="text-sm font-medium tracking-[0.15em] uppercase text-[#083256]">
-                    Deine Kontaktdaten
-                  </h2>
-                </div>
-                <BookingForm
-                  selectedEvent={selectedEvent}
-                  selectedSlot={selectedSlot}
-                  onSubmit={handleBook}
-                  loading={loadingBooking}
-                  error={errorBooking}
-                />
-              </section>
+                    <div className="mb-6 text-center">
+                      <h3 className="font-serif text-xl text-[#083256] mb-1">{selectedEvent.title}</h3>
+                      <p className="text-sm text-[#6B7280]">
+                        {selectedEvent.duration} Minuten · Zoom-Videocall
+                      </p>
+                    </div>
+
+                    <div className="bg-white border border-[#E8E4DF] p-6 sm:p-8 shadow-sm">
+                      <CalendarView
+                        selectedDate={selectedDate}
+                        onDateSelect={setSelectedDate}
+                        weekStart={weekStart}
+                        onWeekChange={setWeekStart}
+                      />
+
+                      {errorSlots && (
+                        <div className="mt-6 flex items-start gap-3 p-4 bg-red-50 border border-red-200 text-red-700 text-sm">
+                          <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" strokeWidth={1.5} />
+                          <span>{errorSlots}</span>
+                        </div>
+                      )}
+
+                      {selectedDate && (
+                        <div
+                          ref={timeSlotsRef}
+                          className="mt-8 pt-8 border-t border-[#E8E4DF] animate-fadeIn"
+                        >
+                          <div className="flex items-center gap-2 mb-5">
+                            <Clock className="w-4 h-4 text-[#B59B54]" strokeWidth={1.5} />
+                            <span className="text-[10px] font-medium tracking-[0.2em] uppercase text-[#6B7280]">
+                              Verfügbare Zeiten am {formatDate(selectedDate)}
+                            </span>
+                          </div>
+                          <TimeSlots
+                            slots={slotsForSelectedDay}
+                            selectedSlot={selectedSlot}
+                            onSelect={setSelectedSlot}
+                            loading={loadingSlots}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                )}
+
+                {selectedSlot && selectedEvent && (
+                  <section ref={step3Ref} id="step-2" className="animate-fadeIn scroll-mt-36">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="w-8 h-8 bg-[#083256] flex items-center justify-center">
+                        <span className="text-white font-mono text-sm">02</span>
+                      </div>
+                      <h2 className="text-sm font-medium tracking-[0.15em] uppercase text-[#083256]">
+                        Deine Kontaktdaten
+                      </h2>
+                    </div>
+                    <BookingForm
+                      selectedEvent={selectedEvent}
+                      selectedSlot={selectedSlot}
+                      onSubmit={handleBook}
+                      loading={loadingBooking}
+                      error={errorBooking}
+                    />
+                  </section>
+                )}
+              </>
             )}
           </>
         )}
       </main>
 
-      {/* Footer */}
       <footer className="bg-[#083256] mt-auto">
         <div className="max-w-5xl mx-auto px-6 py-10">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-6">

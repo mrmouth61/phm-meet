@@ -2,9 +2,16 @@ import { NextResponse } from 'next/server'
 
 const N8N_BASE_URL = 'https://n8n.phm-bonn.de'
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const res = await fetch(`${N8N_BASE_URL}/webhook/meet-event-types`, {
+    const { searchParams } = new URL(request.url)
+    const all = searchParams.get('all')
+    const webhookUrl =
+      all === 'true'
+        ? `${N8N_BASE_URL}/webhook/meet-event-types?all=true`
+        : `${N8N_BASE_URL}/webhook/meet-event-types`
+
+    const res = await fetch(webhookUrl, {
       cache: 'no-store',
     })
     if (!res.ok) {
