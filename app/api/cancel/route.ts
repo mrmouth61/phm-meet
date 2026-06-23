@@ -22,36 +22,19 @@ export async function POST(request: NextRequest) {
       signal: AbortSignal.timeout(15_000),
     })
 
-    const text = await res.text().catch(() => '')
-
     if (!res.ok) {
-      console.error('[api/cancel] n8n error:', res.status, text.slice(0, 500))
-      let message = 'Stornierung konnte nicht durchgeführt werden'
-      try {
-        const errBody = text ? JSON.parse(text) : null
-        if (errBody && typeof errBody === 'object' && 'error' in errBody) {
-          message = String((errBody as { error: unknown }).error)
-        }
-      } catch {
-        /* n8n liefert manchmal Plain-Text */
-      }
-      return NextResponse.json({ error: message }, { status: res.status })
+      const text = await res.text().catch(() => '')
+      console.error('[api/cancel] n8n error:', res.status, text)
+      return NextResponse.json(
+        { error: 'Stornierung konnte nicht durchgeführt werden' },
+        { status: res.status }
+      )
     }
 
-    if (!text.trim()) {
-      return NextResponse.json({ success: true })
-    }
-
-    try {
-      const data = JSON.parse(text)
-      return NextResponse.json(Array.isArray(data) ? data[0] : data)
-    } catch {
-      console.error('[api/cancel] n8n non-JSON ok response:', text.slice(0, 200))
-      return NextResponse.json({ success: true, raw: text.slice(0, 200) })
-    }
+    const data = await res.json()
+    return NextResponse.json(Array.isArray(data) ? data[0] : data)
   } catch (err) {
     console.error('[api/cancel] Error:', err)
-    const message = err instanceof Error ? err.message : 'Interner Fehler'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: 'Interner Fehler' }, { status: 500 })
   }
 }
