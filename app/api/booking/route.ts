@@ -27,38 +27,18 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const text = await res.text().catch(() => '')
-
     if (!res.ok) {
-      console.error('[api/booking] n8n error:', res.status, text.slice(0, 500))
+      const text = await res.text().catch(() => '')
+      console.error('[api/booking] n8n error:', res.status, text)
       return NextResponse.json(
         { error: 'Fehler beim Laden der Buchung' },
         { status: res.status }
       )
     }
 
-    if (!text.trim()) {
-      return NextResponse.json({ error: 'Buchung nicht gefunden' }, { status: 404 })
-    }
-
-    let data: unknown
-    try {
-      data = JSON.parse(text)
-    } catch {
-      console.error('[api/booking] n8n non-JSON ok response:', text.slice(0, 200))
-      return NextResponse.json({ error: 'Buchung nicht gefunden' }, { status: 404 })
-    }
-    // n8n kann ein Array, ein direktes Booking oder ein Wrapper-Objekt liefern.
-    const raw = Array.isArray(data) ? data[0] : data
-    const booking = raw?.booking ?? raw
-
-    if (!booking || !booking.token || !booking.start_time) {
-      return NextResponse.json(
-        { error: 'Buchung nicht gefunden oder unvollständig' },
-        { status: 404 }
-      )
-    }
-
+    const data = await res.json()
+    // n8n kann ein Array oder ein Objekt zurückgeben — normalisieren
+    const booking = Array.isArray(data) ? data[0] : data
     return NextResponse.json(booking)
   } catch (err) {
     console.error('[api/booking] Error:', err)
