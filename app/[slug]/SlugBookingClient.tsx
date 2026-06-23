@@ -1,18 +1,21 @@
 "use client"
 
-import type { EventType } from "@/lib/booking-api"
+import type { ApiEventType } from "@/lib/booking-api"
+import { mapApiToEventType } from "@/lib/event-meta"
 import { BookingWizard } from "@/components/BookingWizard"
 
 interface SlugBookingClientProps {
-  preselectedEventType: EventType
+  eventType: ApiEventType
 }
 
-export function SlugBookingClient({ preselectedEventType }: SlugBookingClientProps) {
+export function SlugBookingClient({ eventType }: SlugBookingClientProps) {
+  const mapped = mapApiToEventType(eventType)
+
   return (
     <BookingWizard
       slugMode
-      preselectedEventType={preselectedEventType}
-      initialEventTypes={[preselectedEventType]}
+      preselectedEventType={mapped}
+      initialEventTypes={[mapped]}
     />
   )
 }

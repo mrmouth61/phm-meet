@@ -4,8 +4,8 @@ import {
   fetchEventTypesServer,
   matchEventTypeBySlug,
   RESERVED_SLUGS,
+  type ApiEventType,
 } from "@/lib/booking-api"
-import { mapApiToEventType } from "@/lib/event-meta"
 import { SlugBookingClient } from "./SlugBookingClient"
 import { UnavailableEventType } from "./UnavailableEventType"
 
@@ -42,11 +42,5 @@ export default async function SlugPage({ params }: SlugPageProps) {
     return <UnavailableEventType title={matched.title} />
   }
 
-  const eventType = mapApiToEventType(matched)
-
-  return (
-    <SlugBookingClient
-      preselectedEventType={eventType}
-    />
-  )
+  return <SlugBookingClient eventType={matched as ApiEventType} />
 }
