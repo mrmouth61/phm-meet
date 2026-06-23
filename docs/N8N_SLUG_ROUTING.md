@@ -1,7 +1,7 @@
 # n8n-Änderungen: Slug-basierte Terminseiten
 
 > Workflow-IDs: `SFPXS0DbJiXmd64n` (Meet API) · `vA97iNkI9AGEtAX3` (PHM-Flow)
-> n8n MCP war in dieser Session nicht authentifiziert — manuell in n8n umsetzen.
+> **Status 2026-06-23:** Umgesetzt via `phm-cockpit/scripts/patch_meet_slug_routing.py`
 
 ## 1. Meet API — `/webhook/meet-event-types` (SFPXS0DbJiXmd64n)
 
