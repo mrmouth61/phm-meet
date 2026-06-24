@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const N8N_BASE_URL = 'https://n8n.phm-bonn.de'
+const N8N_BASE =
+  process.env.N8N_INTERNAL_URL?.replace(/\/$/, '') || 'https://n8n.phm-bonn.de'
+
+const MAX_ATTEMPTS = 3
+const TIMEOUT_MS = 10_000
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
@@ -12,15 +16,41 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'eventType und date sind Pflicht' }, { status: 400 })
   }
 
-  try {
-    const url = `${N8N_BASE_URL}/webhook/meet-slots?eventType=${eventType}&date=${date}&range=${range}`
-    const res = await fetch(url, { cache: 'no-store' })
-    if (!res.ok) {
-      return NextResponse.json({ error: 'n8n error' }, { status: res.status })
+  const url = `${N8N_BASE}/webhook/meet-slots?eventType=${encodeURIComponent(eventType)}&date=${encodeURIComponent(date)}&range=${encodeURIComponent(range)}`
+
+  let lastError: unknown
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(url, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      })
+      const text = await res.text()
+
+      if (!res.ok) {
+        lastError = new Error(`n8n HTTP ${res.status}`)
+        if (attempt < MAX_ATTEMPTS) continue
+        return NextResponse.json({ error: 'n8n error' }, { status: res.status })
+      }
+
+      if (!text.trim()) {
+        lastError = new Error('empty n8n response')
+        if (attempt < MAX_ATTEMPTS) continue
+        return NextResponse.json({
+          slots: [],
+          timezone: 'Europe/Berlin',
+          eventType: { slug: eventType, title: eventType, duration: 0 },
+          meta: { emptyResponse: true },
+        })
+      }
+
+      return NextResponse.json(JSON.parse(text))
+    } catch (err) {
+      lastError = err
+      if (attempt < MAX_ATTEMPTS) continue
     }
-    const data = await res.json()
-    return NextResponse.json(data)
-  } catch (err) {
-    return NextResponse.json({ error: 'Verbindungsfehler zu n8n' }, { status: 502 })
   }
+
+  console.error('[api/slots] failed after retries:', lastError)
+  return NextResponse.json({ error: 'Verbindungsfehler zu n8n' }, { status: 502 })
 }
