@@ -211,14 +211,22 @@ export default function ReschedulePage() {
     setSelectedSlot(null)
 
     fetch(`/api/slots?eventType=${booking.event_type}&date=${dateParam}&range=week`)
-      .then(r => r.json())
+      .then(r => {
+        if (!r.ok) throw new Error(`${r.status}`)
+        return r.json()
+      })
       .then((data: unknown) => {
-        // API returns flat array of ISO strings
-        const all: string[] = Array.isArray(data)
-          ? (data as string[])
-          : ((data as any).slots ?? [])
+        const raw = Array.isArray(data)
+          ? data
+          : ((data as { slots?: unknown[] }).slots ?? [])
+        const all: string[] = raw
+          .map((slot) =>
+            typeof slot === 'string'
+              ? slot
+              : (slot as { start?: string }).start ?? ''
+          )
+          .filter(Boolean)
 
-        // Group by YYYY-MM-DD
         const grouped: Record<string, string[]> = {}
         for (const iso of all) {
           const key = iso.slice(0, 10)
